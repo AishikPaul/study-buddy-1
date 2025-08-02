@@ -131,7 +131,7 @@ st.title("🧠 Study Buddy App")
 api_key = st.sidebar.text_input("🔑 Enter your GROQ API Key", type="password")
 
 if api_key:
-    st.session_state.llm = ChatGroq(temperature=0, model_name="llama3-8b-8192", api_key=api_key)
+    st.session_state.llm = ChatGroq(temperature=0.7, model_name="llama3-8b-8192", api_key=api_key)
     embed_model = SentenceTransformer("all-MiniLM-L6-v2")
 
     if "text" not in st.session_state:
