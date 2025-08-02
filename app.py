@@ -4,19 +4,13 @@ import streamlit as st
 import os
 import faiss
 import numpy as np
+import time
 from PyPDF2 import PdfReader
 from docx import Document
 from sentence_transformers import SentenceTransformer
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
-
-# Initialize embedding model
-embed_model = SentenceTransformer("all-MiniLM-L6-v2")
-
-# Initialize Groq LLM
-os.environ["GROQ_API_KEY"] = "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"  # Replace securely
-llm = ChatGroq(temperature=0, model_name="llama3-8b-8192")
 
 # ----------------------------- Utility Functions ----------------------------- #
 
@@ -88,15 +82,15 @@ Context:
 
 Question: {question}
 """
-    return llm.invoke([HumanMessage(content=prompt)]).content
+    return st.session_state.llm.invoke([HumanMessage(content=prompt)]).content
 
 def generate_summary(text):
     prompt = f"Summarize the following clearly and concisely:\n\n{text}"
-    return llm.invoke([HumanMessage(content=prompt)]).content
+    return st.session_state.llm.invoke([HumanMessage(content=prompt)]).content
 
 def generate_flashcards(text):
     prompt = f"Generate 5 Q&A flashcards from this content:\n\n{text}"
-    return llm.invoke([HumanMessage(content=prompt)]).content
+    return st.session_state.llm.invoke([HumanMessage(content=prompt)]).content
 
 def generate_mcqs(text, difficulty="medium"):
     prompt = f"""
@@ -106,65 +100,125 @@ Generate 5 multiple choice questions of {difficulty} difficulty based on this co
 Format:
 Q1. ...\nA. ...\nB. ...\nC. ...\nD. ...\nAnswer: ...
 """
-    return llm.invoke([HumanMessage(content=prompt)]).content
+    return st.session_state.llm.invoke([HumanMessage(content=prompt)]).content
+
+def parse_mcqs(mcq_text):
+    questions = []
+    blocks = mcq_text.strip().split("Q")
+    for block in blocks:
+        if block.strip():
+            lines = block.strip().split("\n")
+            q = "Q" + lines[0]
+            options = lines[1:5]
+            answer_line = [line for line in lines if line.startswith("Answer")]
+            ans = answer_line[0] if answer_line else "Answer:"
+            questions.append({"question": q, "options": options, "answer": ans})
+    return questions
 
 # ----------------------------- Streamlit UI ----------------------------- #
 st.set_page_config(page_title="📚 Study Buddy App", layout="wide")
-st.title("🧠 Study Buddy App 999")
+st.title("🧠 Study Buddy App")
 
-if "text" not in st.session_state:
-    st.session_state.text = None
-    st.session_state.small_chunks = []
-    st.session_state.big_chunks = []
-    st.session_state.small_index = None
-    st.session_state.big_index = None
+api_key = st.sidebar.text_input("🔑 Enter your GROQ API Key", type="password")
 
-uploaded_file = st.sidebar.file_uploader("Upload your study material", type=["pdf", "txt", "docx"])
-if uploaded_file:
-    st.sidebar.success(f"Uploaded: {uploaded_file.name}")
-    text = extract_text(uploaded_file)
-    sections = split_into_sections(text)
-    small_chunks, big_chunks = get_dual_chunks_for_sections(sections)
-    small_index, _ = build_index(small_chunks)
-    big_index, _ = build_index(big_chunks)
+if api_key:
+    st.session_state.llm = ChatGroq(temperature=0, model_name="llama3-8b-8192", api_key=api_key)
+    embed_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-    st.session_state.text = text
-    st.session_state.small_chunks = small_chunks
-    st.session_state.big_chunks = big_chunks
-    st.session_state.small_index = small_index
-    st.session_state.big_index = big_index
+    if "text" not in st.session_state:
+        st.session_state.text = None
+        st.session_state.small_chunks = []
+        st.session_state.big_chunks = []
+        st.session_state.small_index = None
+        st.session_state.big_index = None
+        st.session_state.mcqs = []
+        st.session_state.quiz_index = 0
+        st.session_state.quiz_score = 0
+        st.session_state.user_answers = []
 
-menu = st.sidebar.radio("Choose Feature", ["❓ Ask Questions", "📚 Summary", "🧠 Flashcards", "📝 MCQ Generator"])
+    uploaded_file = st.sidebar.file_uploader("Upload your study material", type=["pdf", "txt", "docx"])
+    if uploaded_file:
+        st.sidebar.success(f"Uploaded: {uploaded_file.name}")
+        text = extract_text(uploaded_file)
+        sections = split_into_sections(text)
+        small_chunks, big_chunks = get_dual_chunks_for_sections(sections)
+        small_index, _ = build_index(small_chunks)
+        big_index, _ = build_index(big_chunks)
 
-if st.session_state.text:
-    if menu == "❓ Ask Questions":
-        st.subheader("Ask a question strictly from the document")
-        q = st.text_input("Your Question")
-        if st.button("Ask") and q:
-            response = ask_question(q,
-                st.session_state.small_chunks,
-                st.session_state.big_chunks,
-                st.session_state.small_index,
-                st.session_state.big_index)
-            st.write(response)
+        st.session_state.text = text
+        st.session_state.small_chunks = small_chunks
+        st.session_state.big_chunks = big_chunks
+        st.session_state.small_index = small_index
+        st.session_state.big_index = big_index
 
-    elif menu == "📚 Summary":
-        st.subheader("Document Summary")
-        if st.button("Generate Summary"):
-            summary = generate_summary(st.session_state.text)
-            st.text_area("Summary", summary, height=300)
+    menu = st.sidebar.radio("Choose Feature", ["❓ Ask Questions", "📚 Summary", "🧠 Flashcards", "📝 MCQ Generator"])
 
-    elif menu == "🧠 Flashcards":
-        st.subheader("Flashcards (Q&A pairs)")
-        if st.button("Generate Flashcards"):
-            cards = generate_flashcards(st.session_state.text)
-            st.text_area("Flashcards", cards, height=300)
+    if st.session_state.text:
+        if menu == "❓ Ask Questions":
+            st.subheader("Ask a question strictly from the document")
+            q = st.text_input("Your Question")
+            if st.button("Ask") and q:
+                response = ask_question(q,
+                    st.session_state.small_chunks,
+                    st.session_state.big_chunks,
+                    st.session_state.small_index,
+                    st.session_state.big_index)
+                st.write(response)
 
-    elif menu == "📝 MCQ Generator":
-        st.subheader("Practice Test (MCQ)")
-        level = st.selectbox("Difficulty", ["easy", "medium", "hard"])
-        if st.button("Generate MCQs"):
-            mcqs = generate_mcqs(st.session_state.text, difficulty=level)
-            st.text_area("MCQs", mcqs, height=400)
+        elif menu == "📚 Summary":
+            st.subheader("Document Summary")
+            if st.button("Generate Summary"):
+                summary = generate_summary(st.session_state.text)
+                st.text_area("Summary", summary, height=300)
+
+        elif menu == "🧠 Flashcards":
+            st.subheader("Flashcards (Q&A pairs)")
+            if st.button("Generate Flashcards"):
+                cards = generate_flashcards(st.session_state.text)
+                st.text_area("Flashcards", cards, height=300)
+
+        elif menu == "📝 MCQ Generator":
+            st.subheader("Practice Test (MCQ)")
+            quiz_mode = st.checkbox("🎯 Enable Timed Quiz Mode")
+            level = st.selectbox("Difficulty", ["easy", "medium", "hard"])
+
+            if quiz_mode:
+                num_q = st.slider("Number of Questions", 1, 10, 5)
+                time_limit = st.slider("Time per Question (seconds)", 10, 60, 30)
+
+                if st.button("Start Quiz"):
+                    mcq_text = generate_mcqs(st.session_state.text, difficulty=level)
+                    st.session_state.mcqs = parse_mcqs(mcq_text)[:num_q]
+                    st.session_state.quiz_index = 0
+                    st.session_state.quiz_score = 0
+                    st.session_state.user_answers = []
+
+            if st.session_state.mcqs:
+                i = st.session_state.quiz_index
+                mcq = st.session_state.mcqs[i]
+                st.write(f"**{mcq['question']}**")
+                choice = st.radio("Choose one:", mcq['options'], key=f"q_{i}")
+
+                countdown = st.empty()
+                for sec in range(time_limit, 0, -1):
+                    countdown.markdown(f"⏳ Time left: {sec} sec")
+                    time.sleep(1)
+
+                if st.button("Submit Answer"):
+                    st.session_state.user_answers.append(choice)
+                    correct = mcq['answer'].split(':')[-1].strip()
+                    if choice.strip().startswith(correct):
+                        st.session_state.quiz_score += 1
+                    st.session_state.quiz_index += 1
+
+                    if st.session_state.quiz_index >= len(st.session_state.mcqs):
+                        st.success("Quiz Complete!")
+                        st.write(f"Your Score: {st.session_state.quiz_score} / {len(st.session_state.mcqs)}")
+                        for idx, mcq in enumerate(st.session_state.mcqs):
+                            st.markdown(f"**{mcq['question']}**")
+                            st.markdown("\n".join(mcq['options']))
+                            st.markdown(f"✅ Correct: {mcq['answer']}")
+                            st.markdown(f"🧍 Your Answer: {st.session_state.user_answers[idx]}")
+                        st.session_state.mcqs = []
 else:
-    st.info("👈 Please upload a PDF, DOCX or TXT file to begin.")
+    st.info("👈 Please enter your Groq API key to get started.")
