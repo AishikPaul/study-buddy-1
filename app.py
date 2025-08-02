@@ -135,8 +135,8 @@ if api_key:
         st.session_state.quiz_index = 0
         st.session_state.quiz_score = 0
         st.session_state.user_answers = []
-            if "time_limit" not in st.session_state:
-                st.session_state.time_limit = 30
+        if "time_limit" not in st.session_state:
+            st.session_state.time_limit = 30
 
 
     uploaded_file = st.sidebar.file_uploader("Upload your study material", type=["pdf", "txt", "docx"])
