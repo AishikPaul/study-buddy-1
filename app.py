@@ -94,11 +94,19 @@ def generate_flashcards(text):
 
 def generate_mcqs(text, difficulty="medium"):
     prompt = f"""
-Generate 5 multiple choice questions of {difficulty} difficulty based on this content:
-{text}
+Generate exactly 5 multiple-choice questions of {difficulty} difficulty from the text below.
+Each question should have four options (A, B, C, D) and the correct answer on a new line.
 
-Format:
-Q1. ...\nA. ...\nB. ...\nC. ...\nD. ...\nAnswer: ...
+Use this format exactly:
+Q1. Question text
+A. Option A
+B. Option B
+C. Option C
+D. Option D
+Answer: B
+
+Here is the content:
+{text}
 """
     return st.session_state.llm.invoke([HumanMessage(content=prompt)]).content
 
@@ -109,10 +117,11 @@ def parse_mcqs(mcq_text):
         if block.strip():
             lines = block.strip().split("\n")
             q = "Q" + lines[0]
-            options = lines[1:5]
+            options = [line for line in lines[1:5] if line.strip().startswith(tuple("ABCD"))]
             answer_line = [line for line in lines if line.startswith("Answer")]
             ans = answer_line[0] if answer_line else "Answer:"
-            questions.append({"question": q, "options": options, "answer": ans})
+            if len(options) == 4:
+                questions.append({"question": q, "options": options, "answer": ans})
     return questions
 
 # ----------------------------- Streamlit UI ----------------------------- #
@@ -135,9 +144,7 @@ if api_key:
         st.session_state.quiz_index = 0
         st.session_state.quiz_score = 0
         st.session_state.user_answers = []
-        if "time_limit" not in st.session_state:
-            st.session_state.time_limit = 30
-
+        st.session_state.time_limit = 30
 
     uploaded_file = st.sidebar.file_uploader("Upload your study material", type=["pdf", "txt", "docx"])
     if uploaded_file:
@@ -181,51 +188,47 @@ if api_key:
                 st.text_area("Flashcards", cards, height=300)
 
         elif menu == "📝 MCQ Generator":
-            st.subheader("Practice Test (MCQ)")
-            quiz_mode = st.checkbox("🎯 Enable Timed Quiz Mode")
+            st.subheader("📝 Choose Mode for MCQs")
+            mcq_mode = st.radio("Select Mode", ["📖 Q&A with Answers", "🧪 Practice Quiz"])
             level = st.selectbox("Difficulty", ["easy", "medium", "hard"])
-    
-            if quiz_mode:
-                num_q = st.slider("Number of Questions", 1, 10, 5)
-                time_limit = st.slider("Time per Question (seconds)", 10, 60, 30)
-    
-                if st.button("Start Quiz"):
-                    mcq_text = generate_mcqs(st.session_state.text, difficulty=level)
-                    st.session_state.mcqs = parse_mcqs(mcq_text)[:num_q]
-                    st.session_state.quiz_index = 0
-                    st.session_state.quiz_score = 0
-                    st.session_state.user_answers = []
-                    st.session_state.time_limit = time_limit  # ✅ Save for later use
-    
-            # ✅ Only show if quiz started
-            if st.session_state.mcqs:
-                i = st.session_state.quiz_index
-                if i < len(st.session_state.mcqs):
-                    mcq = st.session_state.mcqs[i]
-                    st.write(f"**{mcq['question']}**")
-                    choice = st.radio("Choose one:", mcq['options'], key=f"q_{i}")
-    
-                    countdown = st.empty()
-                    for sec in range(st.session_state.time_limit, 0, -1):
-                        countdown.markdown(f"⏳ Time left: {sec} sec")
-                        time.sleep(1)
-    
-                    if st.button("Submit Answer", key=f"submit_{i}"):
-                        st.session_state.user_answers.append(choice)
-                        correct = mcq['answer'].split(':')[-1].strip()
-                        if choice.strip().startswith(correct):
-                            st.session_state.quiz_score += 1
-                        st.session_state.quiz_index += 1
-    
-                else:
-                    st.success("✅ Quiz Complete!")
-                    st.write(f"**Your Score: {st.session_state.quiz_score} / {len(st.session_state.mcqs)}**")
-                    for idx, mcq in enumerate(st.session_state.mcqs):
-                        st.markdown(f"**{mcq['question']}**")
-                        st.markdown("\\n".join(mcq['options']))
-                        st.markdown(f"✅ Correct: {mcq['answer']}")
-                        st.markdown(f"🧍 Your Answer: {st.session_state.user_answers[idx]}")
-                    st.session_state.mcqs = []
 
+            if st.button("Generate MCQs"):
+                mcq_text = generate_mcqs(st.session_state.text, difficulty=level)
+                st.session_state.mcqs = parse_mcqs(mcq_text)
+                st.session_state.quiz_index = 0
+                st.session_state.quiz_score = 0
+                st.session_state.user_answers = []
+
+            if st.session_state.mcqs:
+                if mcq_mode == "📖 Q&A with Answers":
+                    for q in st.session_state.mcqs:
+                        st.markdown(f"**{q['question']}**")
+                        st.markdown("\n".join(q['options']))
+                        st.markdown(f"✅ Answer: {q['answer']}")
+
+                elif mcq_mode == "🧪 Practice Quiz":
+                    i = st.session_state.quiz_index
+                    if i < len(st.session_state.mcqs):
+                        q = st.session_state.mcqs[i]
+                        st.write(f"**{q['question']}**")
+                        choice = st.radio("Choose one:", q['options'], key=f"quiz_q_{i}")
+
+                        if st.button("Submit Answer", key=f"submit_{i}"):
+                            correct = q['answer'].split(':')[-1].strip()
+                            if choice.strip().startswith(correct):
+                                st.success("✅ Correct!")
+                                st.session_state.quiz_score += 1
+                            else:
+                                st.error(f"❌ Incorrect. Correct answer: {q['answer']}")
+                            st.session_state.quiz_index += 1
+                    else:
+                        st.success("🎉 Quiz Complete!")
+                        st.write(f"**Score: {st.session_state.quiz_score} / {len(st.session_state.mcqs)}**")
+
+                    if st.button("🔁 Reset Quiz"):
+                        st.session_state.mcqs = []
+                        st.session_state.quiz_index = 0
+                        st.session_state.quiz_score = 0
+                        st.session_state.user_answers = []
 else:
     st.info("👈 Please enter your Groq API key to get started.")
