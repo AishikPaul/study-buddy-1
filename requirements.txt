@@ -6,3 +6,12 @@ python-docx
 langchain
 langchain-groq
 tiktoken
+streamlit
+faiss-cpu
+sentence-transformers
+PyPDF2
+python-docx
+langchain
+langchain-groq
+tiktoken
+
