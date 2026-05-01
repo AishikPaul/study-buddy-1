@@ -3,15 +3,6 @@ faiss-cpu
 sentence-transformers
 PyPDF2
 python-docx
-langchain
+langchain==0.0.350
 langchain-groq
 tiktoken
-streamlit
-faiss-cpu
-sentence-transformers
-PyPDF2
-python-docx
-langchain
-langchain-groq
-tiktoken
-
